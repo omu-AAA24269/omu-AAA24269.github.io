@@ -4,8 +4,29 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Phase 0-1: HTML基礎確認</title>
+    <script>
+    function updateClock() {
+        var now = new Date();
+        var hours = now.getHours();
+        var minutes = now.getMinutes();
+        var seconds = now.getSeconds();
+
+        if (hours < 10) hours = '0' + hours;
+        if (minutes < 10) minutes = '0' + minutes;
+        if (seconds < 10) seconds = '0' + seconds;
+
+        var timeString = hours + ':' + minutes + ':' + seconds;
+        document.getElementById('clock').innerHTML = timeString;
+    }
+    setInterval(updateClock, 1000);
+    window.onload = updateClock;
+</script>
 </head>
 <body>
+    <h1>現在時刻</h1>
+<div id="clock" style="font-size: 48px; font-weight: bold; color: blue;">
+    00:00:00
+</div>
     <p><img src="https://kohacu.com/wp-content/uploads/2020/11/kohacu.com_samune_001863.png" alt="醤油ラーメン" width="360" height="240"></p>
     <a href="second.html">大学生がおススメする旅行先５選</a>
     <h1>🌐 Phase 0-1: HTML基礎確認</h1>
