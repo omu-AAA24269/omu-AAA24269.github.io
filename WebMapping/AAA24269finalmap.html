@@ -63,10 +63,9 @@
                 '<a href="https://nlftp.mlit.go.jp/ksj/gml/datalist/KsjTmplt-P29-v2_0.html">国土数値情報 - 学校データ</a>',
             );
             
-            // ▼▼▼ 追加: クラスタリングレイヤーを作成して地図に追加 ▼▼▼
+            // クラスタグループの作成 
             const markers = L.markerClusterGroup();
             map.addLayer(markers);
-            // ▲▲▲ 追加ここまで ▲▲▲
 
             // GeoJSONレイヤーを作成
             fetch('./P29-21_27.geojson') // 大阪府の学校データのGeoJSONを非同期読み込み
@@ -75,44 +74,78 @@
             // GeoJSONレイヤーを作成
             L.geoJSON(json)
             .bindPopup((layer) => layer.feature.properties.P29_004)    // ポップアップで学校名を表示
-            .addTo(markers);  // ▼変更: mapではなくmarkers（クラスタ）に追加
+            .addTo(markers); // ▼変更：mapではなくmarkersに追加してクラスタ化
             });
-
-            // ▼▼▼ 追加: 避難所データの読み込み (27000_1.geojson) ▼▼▼
-            fetch('./27000_1.geojson')
-            .then((res) => res.json())
-            .then((json) => {
-                L.geoJSON(json, {
-                    pointToLayer: function (feature, latlng) {
-                        return L.circleMarker(latlng, {
-                            radius: 8, fillColor: "green", color: "#000", weight: 1, opacity: 1, fillOpacity: 0.8
-                        });
-                    },
-                    onEachFeature: function (feature, layer) {
-                        if (feature.properties && feature.properties['施設・場所名']) {
-                            layer.bindPopup("避難所: " + feature.properties['施設・場所名']);
-                        }
-                    }
-                }).addTo(markers); // クラスタに追加
-            });
-            // ▲▲▲ 追加ここまで ▲▲▲
-
             
-            // ▼▼▼ 追加: OSRM経路探索 (ステップ16) ▼▼▼
-            const url = 'https://routing.openstreetmap.de/routed-car/route/v1/driving/135.505276,34.592331;135.506274,34.544865?geometries=geojson&overview=full';
-            async function addRouteLayer(){
-                const response = await fetch(url);
-                const json = await response.json();
-                const routeLayer = L.geoJSON(json['routes'][0]['geometry'],{
-                    "color": "#FF00FF", "weight": 6, "opacity": 0.65
+            
+            // ▼▼▼ 追加：避難所データと地震APIの読み込み ▼▼▼
+            
+            // 避難所データ1 (緊急)
+            fetch('./27000_1.geojson').then(res=>res.json()).then(json => {
+                markers.addLayer(L.geoJSON(json, {
+                    pointToLayer: (f, ll) => L.circleMarker(ll, {radius:8, fillColor:"green", color:"#000", weight:1, fillOpacity:0.8}),
+                    onEachFeature: (f, l) => l.bindPopup("緊急避難場所: " + f.properties['施設・場所名'])
+                }));
+                map.fitBounds(markers.getBounds()); // データ読み込み後に全体を表示
+            });
+
+            // 避難所データ2 (指定)
+            fetch('./27000_2.geojson').then(res=>res.json()).then(json => {
+                markers.addLayer(L.geoJSON(json, {
+                    pointToLayer: (f, ll) => L.circleMarker(ll, {radius:8, fillColor:"orange", color:"#000", weight:1, fillOpacity:0.8}),
+                    onEachFeature: (f, l) => l.bindPopup("指定避難所: " + f.properties['施設・場所名'])
+                }));
+            });
+
+            // API連携：P2P地震情報
+            fetch('https://api.p2pquake.net/v2/history?codes=551&limit=20').then(res=>res.json()).then(data => {
+                data.forEach(record => {
+                    const h = record.earthquake.hypocenter;
+                    if(h.latitude !== -200){
+                        markers.addLayer(L.circleMarker([h.latitude, h.longitude], {
+                            radius: 10, fillColor: "red", color: "#000", weight: 1, fillOpacity: 0.8
+                        }).bindPopup(`<b>地震情報</b><br>発生: ${record.earthquake.time}<br>震源: ${h.name}<br>M${h.magnitude}`));
+                    }
                 });
-                routeLayer.addTo(map); // 経路はクラスタ化せず直接マップへ
-                map.fitBounds(routeLayer.getBounds());
-            }
-            addRouteLayer();
-            // ▲▲▲ 追加ここまで ▲▲▲
+            });
+
+
+            // クリックで出発地・目的地を設定してルート検索します
+            
+            let startMarker = null, endMarker = null, routeLine = null;
+
+            map.on('click', function(e) {
+                if (startMarker && endMarker) { // リセット
+                    map.removeLayer(startMarker); map.removeLayer(endMarker);
+                    if (routeLine) map.removeLayer(routeLine);
+                    startMarker = null; endMarker = null; routeLine = null;
+                }
+                if (!startMarker) { // 出発地
+                    startMarker = L.marker(e.latlng).addTo(map).bindPopup("出発地").openPopup();
+                } else { // 目的地＆検索
+                    endMarker = L.marker(e.latlng).addTo(map).bindPopup("目的地").openPopup();
+                    const url = `https://routing.openstreetmap.de/routed-car/route/v1/driving/${startMarker.getLatLng().lng},${startMarker.getLatLng().lat};${endMarker.getLatLng().lng},${endMarker.getLatLng().lat}?geometries=geojson&overview=full`;
+                    fetch(url).then(r => r.json()).then(json => {
+                        if(json.routes && json.routes.length > 0) {
+                            if (routeLine) map.removeLayer(routeLine);
+                            routeLine = L.geoJSON(json.routes[0].geometry, {color: 'blue', weight: 6, opacity: 0.7}).addTo(map);
+                            const dist = (json.routes[0].distance / 1000).toFixed(1);
+                            const time = (json.routes[0].duration / 60).toFixed(0);
+                            endMarker.bindPopup(`目的地<br>距離: ${dist}km<br>時間: 約${time}分`).openPopup();
+                        }
+                    });
+                }
+            });
             
         </script>
-        
+
+        <link
+            rel="stylesheet"
+            href="https://unpkg.com/leaflet.markercluster@1.3.0/dist/MarkerCluster.css"
+        />
+        <link
+            rel="stylesheet"
+            href="https://unpkg.com/leaflet.markercluster@1.3.0/dist/MarkerCluster.Default.css"
+        />
         </body>
 </html>
